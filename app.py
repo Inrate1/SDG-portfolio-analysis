@@ -133,38 +133,94 @@ def profile_chart(pf_w: dict) -> go.Figure:
 
 def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
     fig = go.Figure()
-    n    = 17
-    x_pf = [x * 3.0 for x in range(n)]
-    x_bm = [x + 0.72 for x in x_pf]
-    tick_x = [x + 0.36 for x in x_pf]
-    for name, color, source, xs, sign in [
-        ("PF — very positive (A)", CA,  pf_w, x_pf,  1),
-        ("PF — positive (B)",      CB,  pf_w, x_pf,  1),
-        ("PF — negative (C)",      CC,  pf_w, x_pf, -1),
-        ("PF — very negative (D)", CD,  pf_w, x_pf, -1),
-        ("BM — very positive (A)", CBA, bm_w, x_bm,  1),
-        ("BM — positive (B)",      CBB, bm_w, x_bm,  1),
-        ("BM — negative (C)",      CBC, bm_w, x_bm, -1),
-        ("BM — very negative (D)", CBD, bm_w, x_bm, -1),
+    n = 17
+
+    # Two rows per SDG: PF (top) and BM (bottom)
+    # y positions: for SDG i, PF at (n-i)*2 + 0.45, BM at (n-i)*2 - 0.45
+    y_pf    = [(n - i) * 2 + 0.45 for i in range(n)]
+    y_bm    = [(n - i) * 2 - 0.45 for i in range(n)]
+    y_ticks = [(n - i) * 2        for i in range(n)]
+    y_labels = [f"{i+1}  {SDG_NAMES[i]}" for i in range(n)]
+
+    # Colors matching the reference: gray/black for positive, pink/red for negative
+    COLOR_VP  = "#222222"   # very positive — black
+    COLOR_P   = "#aaaaaa"   # positive — light gray
+    COLOR_N   = "#f4a0a0"   # negative — light pink
+    COLOR_VN  = "#c0392b"   # very negative — dark red
+
+    for label, color, source, ys, key, sign in [
+        ("Very positive (A) — PF",  COLOR_VP, pf_w, y_pf,  "A",  1),
+        ("Positive (B) — PF",       COLOR_P,  pf_w, y_pf,  "B",  1),
+        ("Negative (C) — PF",       COLOR_N,  pf_w, y_pf,  "C", -1),
+        ("Very negative (D) — PF",  COLOR_VN, pf_w, y_pf,  "D", -1),
+        ("Very positive (A) — BM",  COLOR_VP, bm_w, y_bm,  "A",  1),
+        ("Positive (B) — BM",       COLOR_P,  bm_w, y_bm,  "B",  1),
+        ("Negative (C) — BM",       COLOR_N,  bm_w, y_bm,  "C", -1),
+        ("Very negative (D) — BM",  COLOR_VN, bm_w, y_bm,  "D", -1),
     ]:
-        key   = name.split("(")[-1].rstrip(")")
-        vals  = [sign * source[s][key] for s in range(1, 18)]
-        stack = "pf" if xs is x_pf else "bm"
-        text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1 else "" for v in vals]
-        sdg_labels = [f"SDG {i+1}" for i in range(n)]
+        vals = [sign * source[s][key] for s in range(1, 18)]
+        text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1.0 else "" for v in vals]
+        is_pf = "PF" in label
         fig.add_trace(go.Bar(
-            name=name, x=xs, y=vals, marker_color=color,
-            offsetgroup=stack, width=0.65,
-            customdata=[[abs(v), sdg_labels[i]] for i, v in enumerate(vals)],
+            name=label,
+            x=vals,
+            y=ys,
+            orientation="h",
+            marker_color=color,
+            marker_line_width=0,
+            width=0.8,
             text=text_vals,
             textposition="inside",
-            textfont=dict(size=12, color="white"),
-            hovertemplate="%{customdata[1]} — " + name + "<br>%{customdata[0]:.2f}%<extra></extra>",
+            textfont=dict(size=11, color="white" if color in [COLOR_VP, COLOR_VN] else "#333"),
+            customdata=[[abs(v), f"SDG {i+1}", "PF" if is_pf else "BM"] for i, v in enumerate(vals)],
+            hovertemplate="%{customdata[1]} %{customdata[2]} — " + label.split(" — ")[0] +
+                          "<br>%{customdata[0]:.2f}%<extra></extra>",
+            legendgroup=label.split(" — ")[0],
+            showlegend=ys is y_pf,  # only show legend entry once per category
         ))
-    _common_layout(fig)
+
+    # PF / BM row labels on the right
+    for i in range(n):
+        for y_pos, row_lbl in [(y_pf[i], "PF"), (y_bm[i], "BM")]:
+            fig.add_annotation(
+                x=52, y=y_pos,
+                text=f"<b>{row_lbl}</b>",
+                showarrow=False,
+                font=dict(size=9, color="#888"),
+                xanchor="left",
+            )
+
     fig.update_layout(
-        xaxis=dict(tickmode="array", tickvals=tick_x, ticktext=SDG_LABELS, gridcolor="rgba(0,0,0,0)"),
-        height=430,
+        barmode="relative",
+        plot_bgcolor="white",
+        paper_bgcolor="rgba(0,0,0,0)",
+        height=max(600, n * 55),
+        margin=dict(l=10, r=60, t=40, b=10),
+        xaxis=dict(
+            title="Weighted Revenue Share (%)",
+            ticksuffix="%",
+            gridcolor="#e8e8e8",
+            zeroline=True,
+            zerolinecolor="#aaa",
+            zerolinewidth=1.5,
+            range=[-25, 55],
+        ),
+        yaxis=dict(
+            tickmode="array",
+            tickvals=y_ticks,
+            ticktext=y_labels,
+            gridcolor="rgba(0,0,0,0)",
+            tickfont=dict(size=12),
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.04,
+            xanchor="center",
+            x=0.5,
+            font_size=11,
+            traceorder="normal",
+        ),
     )
     return fig
 
@@ -291,7 +347,7 @@ def main():
         st.plotly_chart(profile_chart(pf_w), use_container_width=True)
 
     with tab2:
-        st.caption("Left bar = portfolio, right bar = SPI benchmark. Stacked A/B positive above, C/D negative below.")
+        st.caption("Top bar = portfolio (PF), bottom bar = SPI benchmark (BM). Positive values extend right, negative left. Hover for exact values.")
         st.plotly_chart(compare_chart(pf_w, bm_w), use_container_width=True)
 
     with tab3:
