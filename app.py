@@ -134,9 +134,9 @@ def profile_chart(pf_w: dict) -> go.Figure:
 def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
     fig = go.Figure()
     n   = 17
-    x_pf = list(range(n))
-    x_bm = [x + 0.4 for x in x_pf]
-    tick_x = [x + 0.2 for x in x_pf]
+    x_pf = [x * 2.2 for x in range(n)]
+    x_bm = [x + 0.32 for x in x_pf]
+    tick_x = [x + 0.16 for x in x_pf]
     for name, color, source, xs, sign in [
         ("PF — very positive (A)", CA,  pf_w, x_pf,  1),
         ("PF — positive (B)",      CB,  pf_w, x_pf,  1),
@@ -152,7 +152,7 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
         stack = "pf" if xs is x_pf else "bm"
         fig.add_trace(go.Bar(
             name=name, x=xs, y=vals, marker_color=color,
-            offsetgroup=stack, width=0.38,
+            offsetgroup=stack, width=0.28,
             customdata=[abs(v) for v in vals],
             text=[f"SDG {i+1}" for i in range(n)],
             hovertemplate="%{text} — " + name + "<br>%{customdata:.2f}%<extra></extra>",
