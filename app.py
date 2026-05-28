@@ -191,35 +191,18 @@ def main():
     </div>
     """, unsafe_allow_html=True)
 
-    # Sidebar
-    with st.sidebar:
-        st.markdown("### 📂 Upload portfolio")
-        uploaded = st.file_uploader(
-            "Excel file (.xlsx)",
-            type=["xlsx", "xls"],
-            help='Needs sheets "Portfolio" and "SPI" with columns Weight, Security Name / Company Name, Inrate Sector, and 1_A … 17_D.',
-        )
-        st.markdown("""
-        <div class="format-hint">
-        <strong>Required format</strong><br/>
-        Sheets: <code>Portfolio</code> and <code>SPI</code><br/>
-        Columns: <code>Weight</code>, <code>Security Name</code>,
-        <code>Inrate Sector</code>,<br/>
-        then <code>1_A</code> <code>1_B</code> <code>1_C</code> <code>1_D</code>
-        … <code>17_D</code><br/>
-        A = very positive &nbsp;·&nbsp; B = positive<br/>
-        C = negative &nbsp;·&nbsp; D = very negative<br/>
-        Values = revenue share (0–100%) per holding
-        </div>
-        """, unsafe_allow_html=True)
+    # File uploader — on main page, always visible
+    uploaded = st.file_uploader(
+        "📂 Upload your portfolio Excel file (.xlsx)",
+        type=["xlsx", "xls"],
+        help='Needs sheets "Portfolio" and "SPI" with columns Weight, Security Name / Company Name, Inrate Sector, and 1_A … 17_D.',
+    )
 
     # Landing
     if uploaded is None:
+        st.markdown("<br/>", unsafe_allow_html=True)
         c1, c2 = st.columns([1, 1])
         with c1:
-            st.markdown("### Get started")
-            st.info("Upload your Inrate-format Excel file from the sidebar to analyse SDG contributions across all 17 goals and compare against your benchmark.", icon="⬅️")
-        with c2:
             st.markdown("### What you'll see")
             for icon, title, desc in [
                 ("📊", "SDG Profile",    "Weighted revenue share per SDG — A/B/C/D stacked"),
@@ -228,6 +211,19 @@ def main():
                 ("🏢", "Holdings",       "All constituents ranked by weight"),
             ]:
                 st.markdown(f"**{icon} {title}** — {desc}")
+        with c2:
+            st.markdown("""
+            <div class="format-hint">
+            <strong>Required file format</strong><br/>
+            Sheets: <code>Portfolio</code> and <code>SPI</code><br/>
+            Columns: <code>Weight</code>, <code>Security Name</code>,
+            <code>Inrate Sector</code>,<br/>
+            then <code>1_A</code> <code>1_B</code> <code>1_C</code> <code>1_D</code>
+            … <code>17_D</code><br/>
+            A = very positive &nbsp;·&nbsp; B = positive<br/>
+            C = negative &nbsp;·&nbsp; D = very negative
+            </div>
+            """, unsafe_allow_html=True)
         return
 
     # Parse
