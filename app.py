@@ -137,9 +137,9 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
 
     # Two rows per SDG: PF (top) and BM (bottom)
     # y positions: for SDG i, PF at (n-i)*2 + 0.45, BM at (n-i)*2 - 0.45
-    y_pf    = [(n - i) * 2 + 0.45 for i in range(n)]
-    y_bm    = [(n - i) * 2 - 0.45 for i in range(n)]
-    y_ticks = [(n - i) * 2        for i in range(n)]
+    y_pf    = [(n - i) * 3 + 0.48 for i in range(n)]
+    y_bm    = [(n - i) * 3 - 0.48 for i in range(n)]
+    y_ticks  = [(n - i) * 3 for i in range(n)]
     y_labels = [f"{i+1}  {SDG_NAMES[i]}" for i in range(n)]
 
     # Colors matching the reference: gray/black for positive, pink/red for negative
@@ -179,23 +179,19 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
             showlegend=ys is y_pf,  # only show legend entry once per category
         ))
 
-    # PF / BM row labels on the right
-    for i in range(n):
-        for y_pos, row_lbl in [(y_pf[i], "PF"), (y_bm[i], "BM")]:
-            fig.add_annotation(
-                x=52, y=y_pos,
-                text=f"<b>{row_lbl}</b>",
-                showarrow=False,
-                font=dict(size=9, color="#888"),
-                xanchor="left",
-            )
+    # Single PF/BM label at the top of the chart
+    top_y = y_pf[0] + 1.2
+    fig.add_annotation(x=0, y=top_y, text="<b>▲ PF</b>", showarrow=False,
+                       font=dict(size=10, color="#555"), xanchor="center")
+    fig.add_annotation(x=0, y=top_y - 0.9, text="<b>▼ BM</b>", showarrow=False,
+                       font=dict(size=10, color="#888"), xanchor="center")
 
     fig.update_layout(
         barmode="relative",
         plot_bgcolor="white",
         paper_bgcolor="rgba(0,0,0,0)",
-        height=max(600, n * 55),
-        margin=dict(l=10, r=60, t=40, b=10),
+        height=max(700, n * 70),
+        margin=dict(l=10, r=20, t=50, b=80),
         xaxis=dict(
             title="Weighted Revenue Share (%)",
             ticksuffix="%",
@@ -203,7 +199,7 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
             zeroline=True,
             zerolinecolor="#aaa",
             zerolinewidth=1.5,
-            range=[-25, 55],
+            range=[-25, 50],
         ),
         yaxis=dict(
             tickmode="array",
@@ -215,7 +211,7 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.04,
+            y=-0.06,
             xanchor="center",
             x=0.5,
             font_size=11,
