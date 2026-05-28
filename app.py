@@ -316,13 +316,23 @@ def main():
         def _clr_neg(v):
             return "color:#1b5e20;font-weight:600" if v < 0 else ("color:#b71c1c;font-weight:600" if v > 0 else "")
 
-        styled = (
-            gap_df.style
-            .applymap(_clr_pos, subset=["Δ pos"])
-            .applymap(_clr_neg, subset=["Δ neg"])
-            .format({"PF pos %": "{:.2f}%", "BM pos %": "{:.2f}%", "Δ pos": "{:+.2f}%",
-                     "PF neg %": "{:.2f}%", "BM neg %": "{:.2f}%", "Δ neg": "{:+.2f}%"})
-        )
+        styler = gap_df.style
+        try:
+            styled = (
+                styler
+                .map(_clr_pos, subset=["Δ pos"])
+                .map(_clr_neg, subset=["Δ neg"])
+                .format({"PF pos %": "{:.2f}%", "BM pos %": "{:.2f}%", "Δ pos": "{:+.2f}%",
+                         "PF neg %": "{:.2f}%", "BM neg %": "{:.2f}%", "Δ neg": "{:+.2f}%"})
+            )
+        except AttributeError:
+            styled = (
+                styler
+                .applymap(_clr_pos, subset=["Δ pos"])
+                .applymap(_clr_neg, subset=["Δ neg"])
+                .format({"PF pos %": "{:.2f}%", "BM pos %": "{:.2f}%", "Δ pos": "{:+.2f}%",
+                         "PF neg %": "{:.2f}%", "BM neg %": "{:.2f}%", "Δ neg": "{:+.2f}%"})
+            )
         st.dataframe(styled, use_container_width=True, height=640)
 
     with tab4:
@@ -332,13 +342,22 @@ def main():
         def _cp(v): return "color:#1b5e20;font-weight:500" if v > 0 else "color:#9aaa98"
         def _cn(v): return "color:#b71c1c;font-weight:500" if v > 0 else "color:#9aaa98"
 
-        styled_h = (
-            h_df.style
-            .applymap(_cp, subset=["Avg pos %"])
-            .applymap(_cn, subset=["Avg neg %"])
-            .format({"Weight %": "{:.1f}%", "Avg pos %": "{:.2f}%", "Avg neg %": "{:.2f}%"})
-            .bar(subset=["Weight %"], color="#c8e6c9", vmin=0)
-        )
+        try:
+            styled_h = (
+                h_df.style
+                .map(_cp, subset=["Avg pos %"])
+                .map(_cn, subset=["Avg neg %"])
+                .format({"Weight %": "{:.1f}%", "Avg pos %": "{:.2f}%", "Avg neg %": "{:.2f}%"})
+                .bar(subset=["Weight %"], color="#c8e6c9", vmin=0)
+            )
+        except AttributeError:
+            styled_h = (
+                h_df.style
+                .applymap(_cp, subset=["Avg pos %"])
+                .applymap(_cn, subset=["Avg neg %"])
+                .format({"Weight %": "{:.1f}%", "Avg pos %": "{:.2f}%", "Avg neg %": "{:.2f}%"})
+                .bar(subset=["Weight %"], color="#c8e6c9", vmin=0)
+            )
         st.dataframe(styled_h, use_container_width=True, height=700)
         csv = h_df.to_csv(index=False).encode("utf-8")
         st.download_button("⬇ Download holdings CSV", csv, "holdings.csv", "text/csv")
