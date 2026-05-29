@@ -135,11 +135,11 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
     fig = go.Figure()
     n = 17
 
-    # Colors matching reference style
-    COLOR_VP = "#333333"   # very positive — dark
-    COLOR_P  = "#aaaaaa"   # positive — light gray
-    COLOR_N  = "#f4a0a0"   # negative — light pink/salmon
-    COLOR_VN = "#c0392b"   # very negative — dark red
+    # Same colors as SDG Profile chart
+    COLOR_VP = CA    # very positive — dark green
+    COLOR_P  = CB    # positive — light green
+    COLOR_N  = CC    # negative — orange/salmon
+    COLOR_VN = CD    # very negative — dark red
 
     # y positions: PF top row, BM bottom row per SDG group
     # Groups spaced 3 apart, PF/BM 0.55 apart within group
@@ -166,7 +166,7 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
         show_legend = label not in first_shown
         if show_legend:
             first_shown.add(label)
-        txt_color = "white" if color in [COLOR_VP, COLOR_VN] else "#444"
+        txt_color = "white" if color in [COLOR_VP, COLOR_VN] else "white"
         fig.add_trace(go.Bar(
             name=label,
             x=vals,
