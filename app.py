@@ -55,7 +55,7 @@ SDG_NAMES = [
 ]
 SDG_LABELS = [f"SDG {i+1}" for i in range(17)]
 
-CA, CB, CC, CD       = "#1B5E20", "#66BB6A", "#FFA726", "#B71C1C"
+CA, CB, CC, CD       = "#1B5E20", "#66BB6A", "#f4a0a0", "#B71C1C"
 CBA, CBB, CBC, CBD   = "#004D40", "#80CBC4", "#FFCC02", "#7B1FA2"
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
