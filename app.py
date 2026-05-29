@@ -135,32 +135,38 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
     fig = go.Figure()
     n = 17
 
-    # Two rows per SDG: PF (top) and BM (bottom)
-    # y positions: for SDG i, PF at (n-i)*2 + 0.45, BM at (n-i)*2 - 0.45
-    y_pf    = [(n - i) * 3 + 0.48 for i in range(n)]
-    y_bm    = [(n - i) * 3 - 0.48 for i in range(n)]
-    y_ticks  = [(n - i) * 3 for i in range(n)]
+    # Colors matching reference style
+    COLOR_VP = "#333333"   # very positive — dark
+    COLOR_P  = "#aaaaaa"   # positive — light gray
+    COLOR_N  = "#f4a0a0"   # negative — light pink/salmon
+    COLOR_VN = "#c0392b"   # very negative — dark red
+
+    # y positions: PF top row, BM bottom row per SDG group
+    # Groups spaced 3 apart, PF/BM 0.55 apart within group
+    y_pf    = [(n - i) * 3 + 0.55 for i in range(n)]
+    y_bm    = [(n - i) * 3 - 0.55 for i in range(n)]
+    y_ticks = [(n - i) * 3        for i in range(n)]
     y_labels = [f"{i+1}  {SDG_NAMES[i]}" for i in range(n)]
 
-    # Colors matching the reference: gray/black for positive, pink/red for negative
-    COLOR_VP  = "#222222"   # very positive — black
-    COLOR_P   = "#aaaaaa"   # positive — light gray
-    COLOR_N   = "#f4a0a0"   # negative — light pink
-    COLOR_VN  = "#c0392b"   # very negative — dark red
-
+    first_shown = set()
     for label, color, source, ys, key, sign in [
-        ("Very positive (A) — PF",  COLOR_VP, pf_w, y_pf,  "A",  1),
-        ("Positive (B) — PF",       COLOR_P,  pf_w, y_pf,  "B",  1),
-        ("Negative (C) — PF",       COLOR_N,  pf_w, y_pf,  "C", -1),
-        ("Very negative (D) — PF",  COLOR_VN, pf_w, y_pf,  "D", -1),
-        ("Very positive (A) — BM",  COLOR_VP, bm_w, y_bm,  "A",  1),
-        ("Positive (B) — BM",       COLOR_P,  bm_w, y_bm,  "B",  1),
-        ("Negative (C) — BM",       COLOR_N,  bm_w, y_bm,  "C", -1),
-        ("Very negative (D) — BM",  COLOR_VN, bm_w, y_bm,  "D", -1),
+        ("Very positive (A)", COLOR_VP, pf_w, y_pf, "A",  1),
+        ("Positive (B)",      COLOR_P,  pf_w, y_pf, "B",  1),
+        ("Negative (C)",      COLOR_N,  pf_w, y_pf, "C", -1),
+        ("Very negative (D)", COLOR_VN, pf_w, y_pf, "D", -1),
+        ("Very positive (A)", COLOR_VP, bm_w, y_bm, "A",  1),
+        ("Positive (B)",      COLOR_P,  bm_w, y_bm, "B",  1),
+        ("Negative (C)",      COLOR_N,  bm_w, y_bm, "C", -1),
+        ("Very negative (D)", COLOR_VN, bm_w, y_bm, "D", -1),
     ]:
         vals = [sign * source[s][key] for s in range(1, 18)]
-        text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1.0 else "" for v in vals]
-        is_pf = "PF" in label
+        text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1.5 else "" for v in vals]
+        is_pf = ys is y_pf
+        row = "PF" if is_pf else "BM"
+        show_legend = label not in first_shown
+        if show_legend:
+            first_shown.add(label)
+        txt_color = "white" if color in [COLOR_VP, COLOR_VN] else "#444"
         fig.add_trace(go.Bar(
             name=label,
             x=vals,
@@ -168,54 +174,58 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
             orientation="h",
             marker_color=color,
             marker_line_width=0,
-            width=0.8,
+            width=0.9,
             text=text_vals,
             textposition="inside",
-            textfont=dict(size=11, color="white" if color in [COLOR_VP, COLOR_VN] else "#333"),
-            customdata=[[abs(v), f"SDG {i+1}", "PF" if is_pf else "BM"] for i, v in enumerate(vals)],
-            hovertemplate="%{customdata[1]} %{customdata[2]} — " + label.split(" — ")[0] +
+            textfont=dict(size=11, color=txt_color),
+            customdata=[[abs(v), f"SDG {i+1}", row] for i, v in enumerate(vals)],
+            hovertemplate="%{customdata[1]} %{customdata[2]} — " + label +
                           "<br>%{customdata[0]:.2f}%<extra></extra>",
-            legendgroup=label.split(" — ")[0],
-            showlegend=ys is y_pf,  # only show legend entry once per category
+            legendgroup=label,
+            showlegend=show_legend,
         ))
 
-    # Single PF/BM label at the top of the chart
-    top_y = y_pf[0] + 1.2
-    fig.add_annotation(x=0, y=top_y, text="<b>▲ PF</b>", showarrow=False,
-                       font=dict(size=10, color="#555"), xanchor="center")
-    fig.add_annotation(x=0, y=top_y - 0.9, text="<b>▼ BM</b>", showarrow=False,
-                       font=dict(size=10, color="#888"), xanchor="center")
+    # PF / BM row annotations on the left — shown only once at top
+    fig.add_annotation(
+        x=-26, y=y_pf[0], text="<b>PF</b>", showarrow=False,
+        font=dict(size=10, color="#555"), xanchor="right", xref="x", yref="y"
+    )
+    fig.add_annotation(
+        x=-26, y=y_bm[0], text="<b>BM</b>", showarrow=False,
+        font=dict(size=10, color="#999"), xanchor="right", xref="x", yref="y"
+    )
 
     fig.update_layout(
         barmode="relative",
-        plot_bgcolor="white",
+        plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        height=max(700, n * 70),
-        margin=dict(l=10, r=20, t=50, b=80),
+        height=max(700, n * 72),
+        margin=dict(l=20, r=20, t=30, b=100),
         xaxis=dict(
             title="Weighted Revenue Share (%)",
             ticksuffix="%",
-            gridcolor="#e8e8e8",
+            gridcolor="rgba(128,128,128,0.15)",
             zeroline=True,
-            zerolinecolor="#aaa",
+            zerolinecolor="#888",
             zerolinewidth=1.5,
-            range=[-25, 50],
+            range=[-27, 52],
         ),
         yaxis=dict(
             tickmode="array",
             tickvals=y_ticks,
             ticktext=y_labels,
-            gridcolor="rgba(0,0,0,0)",
+            gridcolor="rgba(128,128,128,0.08)",
             tickfont=dict(size=12),
         ),
         legend=dict(
             orientation="h",
             yanchor="top",
-            y=-0.06,
+            y=-0.05,
             xanchor="center",
             x=0.5,
-            font_size=11,
+            font_size=12,
             traceorder="normal",
+            itemsizing="constant",
         ),
     )
     return fig
