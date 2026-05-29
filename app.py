@@ -116,10 +116,10 @@ def build_holdings(df: pd.DataFrame) -> pd.DataFrame:
 def profile_chart(pf_w: dict) -> go.Figure:
     fig = go.Figure()
     for name, color, key, sign in [
-        ("Very positive (A)", CA, "A",  1),
-        ("Positive (B)",      CB, "B",  1),
-        ("Negative (C)",      CC, "C", -1),
         ("Very negative (D)", CD, "D", -1),
+        ("Negative (C)",      CC, "C", -1),
+        ("Positive (B)",      CB, "B",  1),
+        ("Very positive (A)", CA, "A",  1),
     ]:
         vals = [sign * pf_w[s][key] for s in range(1, 18)]
         fig.add_trace(go.Bar(
@@ -150,14 +150,14 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
 
     first_shown = set()
     for label, color, source, ys, key, sign in [
-        ("Very positive (A)", COLOR_VP, pf_w, y_pf, "A",  1),
-        ("Positive (B)",      COLOR_P,  pf_w, y_pf, "B",  1),
-        ("Negative (C)",      COLOR_N,  pf_w, y_pf, "C", -1),
         ("Very negative (D)", COLOR_VN, pf_w, y_pf, "D", -1),
-        ("Very positive (A)", COLOR_VP, bm_w, y_bm, "A",  1),
-        ("Positive (B)",      COLOR_P,  bm_w, y_bm, "B",  1),
-        ("Negative (C)",      COLOR_N,  bm_w, y_bm, "C", -1),
+        ("Negative (C)",      COLOR_N,  pf_w, y_pf, "C", -1),
+        ("Positive (B)",      COLOR_P,  pf_w, y_pf, "B",  1),
+        ("Very positive (A)", COLOR_VP, pf_w, y_pf, "A",  1),
         ("Very negative (D)", COLOR_VN, bm_w, y_bm, "D", -1),
+        ("Negative (C)",      COLOR_N,  bm_w, y_bm, "C", -1),
+        ("Positive (B)",      COLOR_P,  bm_w, y_bm, "B",  1),
+        ("Very positive (A)", COLOR_VP, bm_w, y_bm, "A",  1),
     ]:
         vals = [sign * source[s][key] for s in range(1, 18)]
         text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1.5 else "" for v in vals]
@@ -235,9 +235,9 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
 def _common_layout(fig: go.Figure):
     fig.update_layout(
         barmode="relative",
-        plot_bgcolor="white", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         yaxis=dict(title="Revenue share (%)", ticksuffix="%",
-                   gridcolor="#ececec", zeroline=True, zerolinecolor="#ccc"),
+                   gridcolor="rgba(128,128,128,0.15)", zeroline=True, zerolinecolor="#888"),
         xaxis=dict(gridcolor="rgba(0,0,0,0)"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02,
                     xanchor="left", x=0, font_size=11),
