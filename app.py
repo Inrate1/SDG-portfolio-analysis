@@ -185,15 +185,16 @@ def compare_chart(pf_w: dict, bm_w: dict) -> go.Figure:
             showlegend=show_legend,
         ))
 
-    # PF / BM row annotations on the left — shown only once at top
-    fig.add_annotation(
-        x=-26, y=y_pf[0], text="<b>PF</b>", showarrow=False,
-        font=dict(size=10, color="#555"), xanchor="right", xref="x", yref="y"
-    )
-    fig.add_annotation(
-        x=-26, y=y_bm[0], text="<b>BM</b>", showarrow=False,
-        font=dict(size=10, color="#999"), xanchor="right", xref="x", yref="y"
-    )
+    # PF / BM labels repeated for every SDG row
+    for i in range(n):
+        fig.add_annotation(
+            x=-26, y=y_pf[i], text="<b>PF</b>", showarrow=False,
+            font=dict(size=9, color="#888"), xanchor="right", xref="x", yref="y"
+        )
+        fig.add_annotation(
+            x=-26, y=y_bm[i], text="<b>BM</b>", showarrow=False,
+            font=dict(size=9, color="#666"), xanchor="right", xref="x", yref="y"
+        )
 
     fig.update_layout(
         barmode="relative",
