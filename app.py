@@ -345,8 +345,9 @@ def main():
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # Tabs
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "📊  SDG Profile", "⚖️  vs Benchmark", "🔍  Gap Analysis", "🏢  Holdings"
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📊  SDG Profile", "⚖️  vs Benchmark", "🔍  Gap Analysis",
+        "🏢  Portfolio Holdings", "📋  Benchmark Holdings", "ℹ️  Methodology"
     ])
 
     with tab1:
@@ -402,16 +403,12 @@ def main():
             )
         st.dataframe(styled, use_container_width=True, height=640)
 
-    with tab4:
-        st.caption("Ranked by portfolio weight. Avg pos/neg = average across all 17 SDGs.")
-        h_df = build_holdings(pf_raw)
-
+    def _holdings_table(df, label, key_suffix):
         def _cp(v): return "color:#1b5e20;font-weight:500" if v > 0 else "color:#9aaa98"
         def _cn(v): return "color:#b71c1c;font-weight:500" if v > 0 else "color:#9aaa98"
-
         try:
             styled_h = (
-                h_df.style
+                df.style
                 .map(_cp, subset=["Avg pos %"])
                 .map(_cn, subset=["Avg neg %"])
                 .format({"Weight %": "{:.1f}%", "Avg pos %": "{:.2f}%", "Avg neg %": "{:.2f}%"})
@@ -419,15 +416,70 @@ def main():
             )
         except AttributeError:
             styled_h = (
-                h_df.style
+                df.style
                 .applymap(_cp, subset=["Avg pos %"])
                 .applymap(_cn, subset=["Avg neg %"])
                 .format({"Weight %": "{:.1f}%", "Avg pos %": "{:.2f}%", "Avg neg %": "{:.2f}%"})
                 .bar(subset=["Weight %"], color="#c8e6c9", vmin=0)
             )
         st.dataframe(styled_h, use_container_width=True, height=700)
-        csv = h_df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇ Download holdings CSV", csv, "holdings.csv", "text/csv")
+        csv = df.to_csv(index=False).encode("utf-8")
+        st.download_button(f"⬇ Download {label} CSV", csv, f"{label.lower().replace(' ','_')}.csv",
+                           "text/csv", key=key_suffix)
+
+    with tab4:
+        st.caption("Ranked by portfolio weight. Avg pos/neg = weighted average revenue share across all 17 SDGs.")
+        h_df = build_holdings(pf_raw)
+        _holdings_table(h_df, "Portfolio Holdings", "dl_pf")
+
+    with tab5:
+        st.caption("Ranked by benchmark weight. Avg pos/neg = weighted average revenue share across all 17 SDGs.")
+        bm_df = build_holdings(spi_raw)
+        _holdings_table(bm_df, "Benchmark Holdings", "dl_bm")
+
+    with tab6:
+        st.markdown("### How the scores are calculated")
+        st.markdown("""
+**Data source**
+
+Each holding in the portfolio and benchmark is assigned SDG impact scores by Inrate.
+For every holding and every SDG (1–17), four revenue share values are provided:
+
+| Rating | Label | Meaning |
+|--------|-------|---------|
+| **A** | Very positive | Revenue strongly aligned with the SDG |
+| **B** | Positive | Revenue moderately aligned with the SDG |
+| **C** | Negative | Revenue moderately harmful to the SDG |
+| **D** | Very negative | Revenue strongly harmful to the SDG |
+
+Values represent the **percentage of a company's revenue** that contributes to each category (0–100%).
+
+---
+
+**Portfolio-level aggregation**
+
+For each SDG and each rating level, the portfolio score is computed as a **weighted average** across all holdings:
+
+$$\text{Portfolio score}_{\text{SDG}, \text{level}} = \sum_{i} w_i \times \text{score}_{i, \text{SDG}, \text{level}}$$
+
+where $w_i$ is the normalised weight of holding $i$ (i.e. weight divided by total portfolio weight).
+
+---
+
+**Summary metrics**
+
+| Metric | Formula |
+|--------|---------|
+| **Net positive** | Average of (A + B) across all 17 SDGs |
+| **Net negative** | Average of (C + D) across all 17 SDGs |
+| **Gap vs benchmark** | Portfolio net positive/negative minus benchmark net positive/negative |
+
+---
+
+**Benchmark**
+
+The benchmark used is the **SPI (Swiss Performance Index)**, sourced from the SPI sheet of the uploaded file and computed identically to the portfolio.
+        """)
 
 
 if __name__ == "__main__":
