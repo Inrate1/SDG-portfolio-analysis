@@ -625,10 +625,8 @@ def main():
 
             rows_pf, rows_bm = [], []
             for sector in all_sectors:
-                pf_w_label = f"{pf_weights.get(sector, 0):.1f}%"
-                bm_w_label = f"{bm_weights.get(sector, 0):.1f}%"
-                row_pf = {"Sector": f"{sector}  (PF {pf_w_label})"}
-                row_bm = {"Sector": f"{sector}  (BM {bm_w_label})"}
+                row_pf = {"Sector": sector, "Type": "PF", "Weight %": pf_weights.get(sector, 0.0)}
+                row_bm = {"Sector": sector, "Type": "BM", "Weight %": bm_weights.get(sector, 0.0)}
                 for s in range(1, 18):
                     pf_val = (pf_sectors[sector][s][key_a] + pf_sectors[sector][s][key_b]) if sector in pf_sectors else 0
                     bm_val = (bm_sectors[sector][s][key_a] + bm_sectors[sector][s][key_b]) if sector in bm_sectors else 0
@@ -637,8 +635,9 @@ def main():
                 rows_pf.append(row_pf)
                 rows_bm.append(row_bm)
 
-            hm_df = pd.DataFrame(rows_pf + rows_bm).set_index("Sector")
-            max_val = hm_df.max().max() or 1
+            hm_df = pd.DataFrame(rows_pf + rows_bm).set_index(["Sector", "Type"])
+            sdg_cols = [f"SDG {s}" for s in range(1, 18)]
+            max_val = hm_df[sdg_cols].max().max() or 1
 
             def color_cell(v):
                 if v == 0: return "color: var(--color-text-secondary)"
@@ -653,10 +652,22 @@ def main():
                     txt = "#B71C1C"
                 return f"background-color: rgb({r},{g},{b}); color: {txt}; font-weight: 500"
 
+            fmt_dict = {"Weight %": "{:.1f}%"}
+            fmt_dict.update({c: "{:.1f}%" for c in sdg_cols})
             try:
-                styled_hm = hm_df.style.map(color_cell).format("{:.1f}%")
+                styled_hm = (
+                    hm_df.style
+                    .map(color_cell, subset=sdg_cols)
+                    .bar(subset=["Weight %"], color="#c8e6c9", vmin=0, vmax=hm_df["Weight %"].max())
+                    .format(fmt_dict)
+                )
             except AttributeError:
-                styled_hm = hm_df.style.applymap(color_cell).format("{:.1f}%")
+                styled_hm = (
+                    hm_df.style
+                    .applymap(color_cell, subset=sdg_cols)
+                    .bar(subset=["Weight %"], color="#c8e6c9", vmin=0, vmax=hm_df["Weight %"].max())
+                    .format(fmt_dict)
+                )
             st.dataframe(styled_hm, use_container_width=True, height=min(800, len(all_sectors) * 80 + 60))
 
         # ── Sub-tab 4: Sector drivers per SDG ────────────────────────────────
