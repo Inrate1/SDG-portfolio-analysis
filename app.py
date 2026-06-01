@@ -112,6 +112,27 @@ def build_holdings(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("Weight %", ascending=False).reset_index(drop=True)
 
 
+def compute_sector_weighted(df: pd.DataFrame) -> dict:
+    """Returns {sector: {sdg: {A,B,C,D}}} weighted by holding weight within sector."""
+    df = df.copy()
+    sectors = df["Inrate Sector"].dropna().unique()
+    result = {}
+    for sector in sectors:
+        s_df = df[df["Inrate Sector"] == sector]
+        result[sector] = compute_weighted(s_df)
+    return result
+
+
+def build_sector_summary(sector_w: dict) -> pd.DataFrame:
+    """Returns a DataFrame with sector-level net pos/neg averaged across 17 SDGs."""
+    rows = []
+    for sector, w in sector_w.items():
+        net_pos = sum(w[s]["A"] + w[s]["B"] for s in range(1, 18)) / 17
+        net_neg = sum(w[s]["C"] + w[s]["D"] for s in range(1, 18)) / 17
+        rows.append({"Sector": sector, "Net pos %": round(net_pos, 2), "Net neg %": round(net_neg, 2)})
+    return pd.DataFrame(rows).sort_values("Net pos %", ascending=False).reset_index(drop=True)
+
+
 # ── Chart builders ────────────────────────────────────────────────────────────
 def profile_chart(pf_w: dict) -> go.Figure:
     fig = go.Figure()
@@ -345,9 +366,10 @@ def main():
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "📊  SDG Profile", "⚖️  vs Benchmark", "🔍  Gap Analysis",
-        "🏢  Portfolio Holdings", "📋  Benchmark Holdings", "ℹ️  Methodology"
+        "🏢  Portfolio Holdings", "📋  Benchmark Holdings",
+        "🏭  Sector Analysis", "ℹ️  Methodology"
     ])
 
     with tab1:
@@ -438,6 +460,166 @@ def main():
         _holdings_table(bm_df, "Benchmark Holdings", "dl_bm")
 
     with tab6:
+        st.markdown("#### Sector-level SDG analysis — portfolio vs benchmark")
+        st.caption("All sector scores are weighted averages within each sector, then compared to the same sector in the benchmark.")
+
+        pf_sectors  = compute_sector_weighted(pf_raw)
+        bm_sectors  = compute_sector_weighted(spi_raw)
+        all_sectors = sorted(set(list(pf_sectors.keys()) + list(bm_sectors.keys())))
+
+        sub1, sub2, sub3, sub4 = st.tabs([
+            "📊 SDG profile per sector",
+            "📈 All sectors overview",
+            "🗂 Heatmap table",
+            "🔍 Sector drivers per SDG",
+        ])
+
+        # ── Sub-tab 1: SDG profile per sector ────────────────────────────────
+        with sub1:
+            pf_sector_names = [s for s in all_sectors if s in pf_sectors]
+            sel_sector = st.selectbox("Select sector", pf_sector_names, key="sel_sector_profile")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown(f"**Portfolio — {sel_sector}**")
+                if sel_sector in pf_sectors:
+                    w = pf_sectors[sel_sector]
+                    fig = profile_chart(w)
+                    fig.update_layout(height=350, margin=dict(t=20, b=20, l=10, r=10))
+                    st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                st.markdown(f"**Benchmark — {sel_sector}**")
+                if sel_sector in bm_sectors:
+                    w = bm_sectors[sel_sector]
+                    fig = profile_chart(w)
+                    fig.update_layout(height=350, margin=dict(t=20, b=20, l=10, r=10))
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("This sector is not present in the benchmark.")
+
+        # ── Sub-tab 2: All sectors overview ──────────────────────────────────
+        with sub2:
+            pf_sum_df  = build_sector_summary(pf_sectors)
+            bm_sum_df  = build_sector_summary(bm_sectors)
+            merged = pf_sum_df.merge(bm_sum_df, on="Sector", suffixes=(" PF", " BM"), how="outer").fillna(0)
+            merged = merged.sort_values("Net pos % PF", ascending=True)
+
+            fig2 = go.Figure()
+            for label, col, color, sign in [
+                ("PF net positive",  "Net pos % PF", "#66BB6A",  1),
+                ("PF net negative",  "Net neg % PF", "#f4a0a0", -1),
+                ("BM net positive",  "Net pos % BM", "#1B5E20",  1),
+                ("BM net negative",  "Net neg % BM", "#B71C1C", -1),
+            ]:
+                vals = merged[col] * sign
+                fig2.add_trace(go.Bar(
+                    name=label, x=vals, y=merged["Sector"],
+                    orientation="h", marker_color=color,
+                    marker_line_width=0,
+                    width=0.35 if "PF" in label else 0.35,
+                    offsetgroup="PF" if "PF" in label else "BM",
+                    customdata=merged[col],
+                    hovertemplate="%{y} — " + label + "<br>%{customdata:.2f}%<extra></extra>",
+                ))
+            fig2.update_layout(
+                barmode="relative",
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                height=max(400, len(merged) * 55),
+                margin=dict(l=10, r=20, t=20, b=60),
+                xaxis=dict(title="Average net SDG score (%)", ticksuffix="%",
+                           gridcolor="rgba(128,128,128,0.15)", zeroline=True, zerolinecolor="#888"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont=dict(size=11)),
+                legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center", font_size=11),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # ── Sub-tab 3: Heatmap table ──────────────────────────────────────────
+        with sub3:
+            view_type = st.radio("Show", ["Net positive (A+B)", "Net negative (C+D)"], horizontal=True, key="hm_view")
+            is_pos = view_type == "Net positive (A+B)"
+            key_a, key_b = ("A","B") if is_pos else ("C","D")
+
+            rows_pf, rows_bm = [], []
+            for sector in all_sectors:
+                row_pf = {"Sector": sector + " (PF)"}
+                row_bm = {"Sector": sector + " (BM)"}
+                for s in range(1, 18):
+                    pf_val = (pf_sectors[sector][s][key_a] + pf_sectors[sector][s][key_b]) if sector in pf_sectors else 0
+                    bm_val = (bm_sectors[sector][s][key_a] + bm_sectors[sector][s][key_b]) if sector in bm_sectors else 0
+                    row_pf[f"SDG {s}"] = round(pf_val, 1)
+                    row_bm[f"SDG {s}"] = round(bm_val, 1)
+                rows_pf.append(row_pf)
+                rows_bm.append(row_bm)
+
+            hm_df = pd.DataFrame(rows_pf + rows_bm).set_index("Sector")
+            max_val = hm_df.max().max() or 1
+
+            def color_cell(v):
+                if v == 0: return "color: var(--color-text-secondary)"
+                alpha = min(v / max_val, 1.0)
+                if is_pos:
+                    g = int(94 + (27 - 94) * alpha)
+                    r, b = int(232 - 232 * alpha), int(232 - 232 * alpha)
+                    txt = "white" if alpha > 0.5 else "#1B5E20"
+                else:
+                    r = int(183 + (244 - 183) * (1 - alpha))
+                    g, b = int(28 * (1 - alpha) + 160 * alpha), int(28 * (1 - alpha) + 160 * alpha)
+                    txt = "#B71C1C"
+                return f"background-color: rgb({r},{g},{b}); color: {txt}; font-weight: 500"
+
+            try:
+                styled_hm = hm_df.style.map(color_cell).format("{:.1f}%")
+            except AttributeError:
+                styled_hm = hm_df.style.applymap(color_cell).format("{:.1f}%")
+            st.dataframe(styled_hm, use_container_width=True, height=min(800, len(all_sectors) * 80 + 60))
+
+        # ── Sub-tab 4: Sector drivers per SDG ────────────────────────────────
+        with sub4:
+            sdg_options = [f"SDG {i+1} — {SDG_NAMES[i]}" for i in range(17)]
+            sel_sdg_str = st.selectbox("Select SDG", sdg_options, key="sel_sdg_drivers")
+            sel_sdg_num = int(sel_sdg_str.split(" ")[1])
+
+            drv_rows = []
+            for sector in all_sectors:
+                pf_pos = (pf_sectors[sector][sel_sdg_num]["A"] + pf_sectors[sector][sel_sdg_num]["B"]) if sector in pf_sectors else 0
+                pf_neg = (pf_sectors[sector][sel_sdg_num]["C"] + pf_sectors[sector][sel_sdg_num]["D"]) if sector in pf_sectors else 0
+                bm_pos = (bm_sectors[sector][sel_sdg_num]["A"] + bm_sectors[sector][sel_sdg_num]["B"]) if sector in bm_sectors else 0
+                bm_neg = (bm_sectors[sector][sel_sdg_num]["C"] + bm_sectors[sector][sel_sdg_num]["D"]) if sector in bm_sectors else 0
+                drv_rows.append({"Sector": sector, "PF pos": pf_pos, "PF neg": pf_neg, "BM pos": bm_pos, "BM neg": bm_neg})
+
+            drv_df = pd.DataFrame(drv_rows)
+            drv_df = drv_df[drv_df[["PF pos","PF neg","BM pos","BM neg"]].sum(axis=1) > 0]
+            drv_df = drv_df.sort_values("PF pos", ascending=True)
+
+            fig4 = go.Figure()
+            for label, col, color, sign in [
+                ("PF positive",  "PF pos", "#66BB6A",  1),
+                ("PF negative",  "PF neg", "#f4a0a0", -1),
+                ("BM positive",  "BM pos", "#1B5E20",  1),
+                ("BM negative",  "BM neg", "#B71C1C", -1),
+            ]:
+                vals = drv_df[col] * sign
+                fig4.add_trace(go.Bar(
+                    name=label, x=vals, y=drv_df["Sector"],
+                    orientation="h", marker_color=color,
+                    marker_line_width=0, width=0.35,
+                    offsetgroup="PF" if "PF" in label else "BM",
+                    customdata=drv_df[col],
+                    hovertemplate="%{y} — " + label + "<br>%{customdata:.2f}%<extra></extra>",
+                ))
+            fig4.update_layout(
+                barmode="relative",
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                height=max(350, len(drv_df) * 55),
+                margin=dict(l=10, r=20, t=20, b=60),
+                xaxis=dict(title=f"Revenue share for {sel_sdg_str.split(' — ')[1]} (%)",
+                           ticksuffix="%", gridcolor="rgba(128,128,128,0.15)",
+                           zeroline=True, zerolinecolor="#888"),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont=dict(size=11)),
+                legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center", font_size=11),
+            )
+            st.plotly_chart(fig4, use_container_width=True)
+
+    with tab7:
         st.markdown("### How the scores are calculated")
         st.markdown("""
 **Data source**
@@ -460,7 +642,7 @@ Values represent the **percentage of a company's revenue** that contributes to e
 
 For each SDG and each rating level, the portfolio score is computed as a **weighted average** across all holdings:
 
-$$\text{Portfolio score}_{\text{SDG}, \text{level}} = \sum_{i} w_i \times \text{score}_{i, \text{SDG}, \text{level}}$$
+Portfolio score (SDG, level) = sum over all holdings i of: weight_i x score(i, SDG, level)
 
 where $w_i$ is the normalised weight of holding $i$ (i.e. weight divided by total portfolio weight).
 
