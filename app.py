@@ -536,6 +536,15 @@ def main():
             shared_max =  max(pf_pos_max, bm_pos_max) * 1.15 or 10
             shared_min = -max(pf_neg_max, bm_neg_max) * 1.15
 
+            pf_w_sel = pf_weights.get(sel_sector, 0)
+            bm_w_sel = bm_weights.get(sel_sector, 0)
+            st.caption(
+                f"These charts show the SDG score **within** the selected sector — what % of that sector's own revenue "
+                f"aligns with each SDG, regardless of how large the sector is in the portfolio. "
+                f"For example, a bar of 88% for {sel_sector} / SDG 3 means 88% of {sel_sector} companies' revenue "
+                f"contributes positively to SDG 3. To get the actual contribution to the overall portfolio, "
+                f"multiply by the sector weight (currently PF: {pf_w_sel:.1f}% | BM: {bm_w_sel:.1f}%)."
+            )
             with col1:
                 st.markdown(f"**Portfolio — {sel_sector}**")
                 if sel_sector in pf_sectors:
