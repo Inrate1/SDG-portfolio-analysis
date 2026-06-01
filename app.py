@@ -566,9 +566,31 @@ def main():
 
         # ── Sub-tab 2: All sectors overview ──────────────────────────────────
         with sub2:
+            view_mode = st.radio(
+                "View",
+                ["Within-sector score", "Portfolio contribution (weighted)"],
+                horizontal=True, key="sub2_view",
+                help="Within-sector: % of sector's own revenue aligned with SDGs. "
+                     "Portfolio contribution: multiplied by sector's weight in portfolio/benchmark."
+            )
+            weighted_view = view_mode == "Portfolio contribution (weighted)"
+
             pf_sum_df  = build_sector_summary(pf_sectors)
             bm_sum_df  = build_sector_summary(bm_sectors)
             merged = pf_sum_df.merge(bm_sum_df, on="Sector", suffixes=(" PF", " BM"), how="outer").fillna(0)
+
+            if weighted_view:
+                # Multiply each sector score by its portfolio weight
+                merged["Net pos % PF"] = merged.apply(lambda r: round(r["Net pos % PF"] * pf_weights.get(r["Sector"], 0) / 100, 2), axis=1)
+                merged["Net neg % PF"] = merged.apply(lambda r: round(r["Net neg % PF"] * pf_weights.get(r["Sector"], 0) / 100, 2), axis=1)
+                merged["Net pos % BM"] = merged.apply(lambda r: round(r["Net pos % BM"] * bm_weights.get(r["Sector"], 0) / 100, 2), axis=1)
+                merged["Net neg % BM"] = merged.apply(lambda r: round(r["Net neg % BM"] * bm_weights.get(r["Sector"], 0) / 100, 2), axis=1)
+                x_title = "Contribution to portfolio SDG score (sector score × sector weight, %)"
+                st.caption("Each bar = within-sector SDG score × sector portfolio weight. Shows the sector's actual impact on the overall portfolio SDG score.")
+            else:
+                x_title = "Average net SDG score within sector (%)"
+                st.caption("Each bar = average net positive/negative across all 17 SDGs, calculated within the sector only — independent of sector weight.")
+
             merged = merged.sort_values("Net pos % PF", ascending=True)
 
             n_sectors = len(merged)
@@ -612,7 +634,7 @@ def main():
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
                 height=max(500, n_sectors * 72),
                 margin=dict(l=20, r=20, t=20, b=80),
-                xaxis=dict(title="Average net SDG score (%)", ticksuffix="%",
+                xaxis=dict(title=x_title, ticksuffix="%",
                            gridcolor="rgba(128,128,128,0.15)", zeroline=True, zerolinecolor="#888"),
                 yaxis=dict(tickmode="array", tickvals=y_ticks2, ticktext=list(merged["Sector"]),
                            gridcolor="rgba(128,128,128,0.08)", tickfont=dict(size=11)),
