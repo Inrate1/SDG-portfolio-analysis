@@ -133,6 +133,15 @@ def build_sector_summary(sector_w: dict) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("Net pos %", ascending=False).reset_index(drop=True)
 
 
+def compute_sector_weights(df: pd.DataFrame) -> dict:
+    """Returns {sector: weight_pct} as % of total portfolio."""
+    total_w = df["Weight"].sum()
+    result = {}
+    for sector, grp in df.groupby("Inrate Sector"):
+        result[sector] = round(grp["Weight"].sum() / total_w * 100, 1)
+    return result
+
+
 # ── Chart builders ────────────────────────────────────────────────────────────
 def profile_chart(pf_w: dict) -> go.Figure:
     fig = go.Figure()
@@ -466,6 +475,40 @@ def main():
         pf_sectors  = compute_sector_weighted(pf_raw)
         bm_sectors  = compute_sector_weighted(spi_raw)
         all_sectors = sorted(set(list(pf_sectors.keys()) + list(bm_sectors.keys())))
+        pf_weights  = compute_sector_weights(pf_raw)
+        bm_weights  = compute_sector_weights(spi_raw)
+
+        # Sector weights summary
+        weight_rows = []
+        for s in all_sectors:
+            weight_rows.append({
+                "Sector": s,
+                "PF weight %": pf_weights.get(s, 0.0),
+                "BM weight %": bm_weights.get(s, 0.0),
+                "Δ weight":    round(pf_weights.get(s, 0.0) - bm_weights.get(s, 0.0), 1),
+            })
+        w_df = pd.DataFrame(weight_rows).sort_values("PF weight %", ascending=False).reset_index(drop=True)
+
+        with st.expander("📊 Sector weights — portfolio vs benchmark", expanded=False):
+            def _clr_delta(v):
+                return "color:#1b5e20;font-weight:600" if v > 0 else ("color:#b71c1c;font-weight:600" if v < 0 else "")
+            try:
+                sw_styled = (
+                    w_df.style
+                    .map(_clr_delta, subset=["Δ weight"])
+                    .format({"PF weight %": "{:.1f}%", "BM weight %": "{:.1f}%", "Δ weight": "{:+.1f}%"})
+                    .bar(subset=["PF weight %"], color="#c8e6c9", vmin=0)
+                    .bar(subset=["BM weight %"], color="#b2dfdb", vmin=0)
+                )
+            except AttributeError:
+                sw_styled = (
+                    w_df.style
+                    .applymap(_clr_delta, subset=["Δ weight"])
+                    .format({"PF weight %": "{:.1f}%", "BM weight %": "{:.1f}%", "Δ weight": "{:+.1f}%"})
+                    .bar(subset=["PF weight %"], color="#c8e6c9", vmin=0)
+                    .bar(subset=["BM weight %"], color="#b2dfdb", vmin=0)
+                )
+            st.dataframe(sw_styled, use_container_width=True, height=min(600, len(w_df)*38 + 40))
 
         sub1, sub2, sub3, sub4 = st.tabs([
             "📊 SDG profile per sector",
@@ -477,7 +520,10 @@ def main():
         # ── Sub-tab 1: SDG profile per sector ────────────────────────────────
         with sub1:
             pf_sector_names = [s for s in all_sectors if s in pf_sectors]
-            sel_sector = st.selectbox("Select sector", pf_sector_names, key="sel_sector_profile")
+            pf_sector_labels = [f"{s}  (PF: {pf_weights.get(s,0):.1f}%  |  BM: {bm_weights.get(s,0):.1f}%)" for s in pf_sector_names]
+            sel_idx = st.selectbox("Select sector", range(len(pf_sector_names)),
+                                   format_func=lambda i: pf_sector_labels[i], key="sel_sector_profile")
+            sel_sector = pf_sector_names[sel_idx]
             col1, col2 = st.columns(2)
             # Compute shared y-axis range across both portfolio and benchmark
             def get_yrange(w):
@@ -523,28 +569,27 @@ def main():
             y_ticks2 = [(n_sectors - i) * 3 for i in range(n_sectors)]
 
             fig2 = go.Figure()
-            for label, col_pos, col_neg, color_pos, color_neg, ys in [
-                ("PF", "Net pos % PF", "Net neg % PF", "#66BB6A", "#f4a0a0", y_pf2),
-                ("BM", "Net pos % BM", "Net neg % BM", "#1B5E20", "#B71C1C", y_bm2),
+            # Use explicit y positions like vs Benchmark tab — no offsetgroup needed
+            for lname, col, color, sign, ys in [
+                ("PF positive", "Net pos % PF", "#66BB6A",  1, y_pf2),
+                ("PF negative", "Net neg % PF", "#f4a0a0", -1, y_pf2),
+                ("BM positive", "Net pos % BM", "#1B5E20",  1, y_bm2),
+                ("BM negative", "Net neg % BM", "#B71C1C", -1, y_bm2),
             ]:
-                for col, color, sign, lname in [
-                    (col_pos, color_pos,  1, f"{label} positive"),
-                    (col_neg, color_neg, -1, f"{label} negative"),
-                ]:
-                    vals = merged[col] * sign
-                    text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1 else "" for v in vals]
-                    fig2.add_trace(go.Bar(
-                        name=lname, x=vals, y=ys,
-                        orientation="h", marker_color=color,
-                        marker_line_width=0, width=0.9,
-                        offsetgroup=label,
-                        text=text_vals, textposition="inside",
-                        textfont=dict(size=10, color="white"),
-                        customdata=[[row, merged[col].iloc[i]] for i, row in enumerate(merged["Sector"])],
-                        hovertemplate="%{customdata[0]} — " + lname + "<br>%{customdata[1]:.2f}%<extra></extra>",
-                        legendgroup=lname.split()[1],
-                        showlegend=ys is y_pf2,
-                    ))
+                vals = merged[col] * sign
+                text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1 else "" for v in vals]
+                stack = "pf" if "PF" in lname else "bm"
+                fig2.add_trace(go.Bar(
+                    name=lname, x=vals, y=ys,
+                    orientation="h", marker_color=color,
+                    marker_line_width=0, width=0.85,
+                    text=text_vals, textposition="inside",
+                    textfont=dict(size=10, color="white"),
+                    customdata=[[merged["Sector"].iloc[i], merged[col].iloc[i]] for i in range(len(merged))],
+                    hovertemplate="%{customdata[0]} — " + lname + "<br>%{customdata[1]:.2f}%<extra></extra>",
+                    legendgroup=lname.split()[1],
+                    showlegend="PF" in lname,
+                ))
 
             # PF/BM labels for each sector
             for i in range(n_sectors):
@@ -568,14 +613,22 @@ def main():
 
         # ── Sub-tab 3: Heatmap table ──────────────────────────────────────────
         with sub3:
+            st.caption(
+                "Each cell shows what % of that sector's own revenue aligns with the SDG — "
+                "independent of how large the sector is in the portfolio. "
+                "Example: Health (PF) SDG 3 = 88.8% means 88.8% of the Health sector's revenue "
+                "contributes positively to SDG 3, regardless of Health being 21% of the portfolio."
+            )
             view_type = st.radio("Show", ["Net positive (A+B)", "Net negative (C+D)"], horizontal=True, key="hm_view")
             is_pos = view_type == "Net positive (A+B)"
             key_a, key_b = ("A","B") if is_pos else ("C","D")
 
             rows_pf, rows_bm = [], []
             for sector in all_sectors:
-                row_pf = {"Sector": sector + " (PF)"}
-                row_bm = {"Sector": sector + " (BM)"}
+                pf_w_label = f"{pf_weights.get(sector, 0):.1f}%"
+                bm_w_label = f"{bm_weights.get(sector, 0):.1f}%"
+                row_pf = {"Sector": f"{sector}  (PF {pf_w_label})"}
+                row_bm = {"Sector": f"{sector}  (BM {bm_w_label})"}
                 for s in range(1, 18):
                     pf_val = (pf_sectors[sector][s][key_a] + pf_sectors[sector][s][key_b]) if sector in pf_sectors else 0
                     bm_val = (bm_sectors[sector][s][key_a] + bm_sectors[sector][s][key_b]) if sector in bm_sectors else 0
