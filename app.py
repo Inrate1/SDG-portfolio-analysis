@@ -623,52 +623,82 @@ def main():
             is_pos = view_type == "Net positive (A+B)"
             key_a, key_b = ("A","B") if is_pos else ("C","D")
 
+            sdg_cols = [f"SDG {s}" for s in range(1, 18)]
+
+            # Build separate PF and BM dataframes
             rows_pf, rows_bm = [], []
             for sector in all_sectors:
-                row_pf = {"Sector": sector, "Type": "PF", "Weight %": pf_weights.get(sector, 0.0)}
-                row_bm = {"Sector": sector, "Type": "BM", "Weight %": bm_weights.get(sector, 0.0)}
+                row_pf = {"Sector": sector, "Weight %": pf_weights.get(sector, 0.0)}
+                row_bm = {"Sector": sector, "Weight %": bm_weights.get(sector, 0.0)}
                 for s in range(1, 18):
-                    pf_val = (pf_sectors[sector][s][key_a] + pf_sectors[sector][s][key_b]) if sector in pf_sectors else 0
-                    bm_val = (bm_sectors[sector][s][key_a] + bm_sectors[sector][s][key_b]) if sector in bm_sectors else 0
-                    row_pf[f"SDG {s}"] = round(pf_val, 1)
-                    row_bm[f"SDG {s}"] = round(bm_val, 1)
+                    row_pf[f"SDG {s}"] = round((pf_sectors[sector][s][key_a] + pf_sectors[sector][s][key_b]) if sector in pf_sectors else 0, 1)
+                    row_bm[f"SDG {s}"] = round((bm_sectors[sector][s][key_a] + bm_sectors[sector][s][key_b]) if sector in bm_sectors else 0, 1)
                 rows_pf.append(row_pf)
                 rows_bm.append(row_bm)
 
-            hm_df = pd.DataFrame(rows_pf + rows_bm).set_index(["Sector", "Type"])
-            sdg_cols = [f"SDG {s}" for s in range(1, 18)]
-            max_val = hm_df[sdg_cols].max().max() or 1
+            pf_hm = pd.DataFrame(rows_pf).set_index("Sector")
+            bm_hm = pd.DataFrame(rows_bm).set_index("Sector")
 
-            def color_cell(v):
-                if v == 0: return "color: var(--color-text-secondary)"
-                alpha = min(v / max_val, 1.0)
-                if is_pos:
-                    g = int(94 + (27 - 94) * alpha)
-                    r, b = int(232 - 232 * alpha), int(232 - 232 * alpha)
-                    txt = "white" if alpha > 0.5 else "#1B5E20"
-                else:
-                    r = int(183 + (244 - 183) * (1 - alpha))
-                    g, b = int(28 * (1 - alpha) + 160 * alpha), int(28 * (1 - alpha) + 160 * alpha)
-                    txt = "#B71C1C"
-                return f"background-color: rgb({r},{g},{b}); color: {txt}; font-weight: 500"
+            # Shared max across both for consistent color scale
+            max_val = max(pf_hm[sdg_cols].max().max(), bm_hm[sdg_cols].max().max()) or 1
+            max_w   = max(pf_hm["Weight %"].max(), bm_hm["Weight %"].max()) or 1
 
+            color_lo = ("#e8f5e9", "#1B5E20") if is_pos else ("#fff3f3", "#B71C1C")
+
+            def make_color_fn(lo, hi):
+                def color_cell(v):
+                    if v == 0:
+                        return "color: #aaa"
+                    alpha = min(v / max_val, 1.0)
+                    # interpolate from light to dark
+                    r0,g0,b0 = int(lo[1:3],16),int(lo[3:5],16),int(lo[5:7],16)
+                    r1,g1,b1 = int(hi[1:3],16),int(hi[3:5],16),int(hi[5:7],16)
+                    r = int(r0 + (r1-r0)*alpha)
+                    g = int(g0 + (g1-g0)*alpha)
+                    b = int(b0 + (b1-b0)*alpha)
+                    txt = "white" if alpha > 0.55 else hi
+                    return f"background-color: rgb({r},{g},{b}); color: {txt}; font-weight: 500"
+                return color_cell
+
+            color_fn = make_color_fn(color_lo[0], color_lo[1])
             fmt_dict = {"Weight %": "{:.1f}%"}
             fmt_dict.update({c: "{:.1f}%" for c in sdg_cols})
-            try:
-                styled_hm = (
-                    hm_df.style
-                    .map(color_cell, subset=sdg_cols)
-                    .bar(subset=["Weight %"], color="#c8e6c9", vmin=0, vmax=hm_df["Weight %"].max())
-                    .format(fmt_dict)
-                )
-            except AttributeError:
-                styled_hm = (
-                    hm_df.style
-                    .applymap(color_cell, subset=sdg_cols)
-                    .bar(subset=["Weight %"], color="#c8e6c9", vmin=0, vmax=hm_df["Weight %"].max())
-                    .format(fmt_dict)
-                )
-            st.dataframe(styled_hm, use_container_width=True, height=min(800, len(all_sectors) * 80 + 60))
+
+            # Color legend
+            legend_color = "#1B5E20" if is_pos else "#B71C1C"
+            legend_label = "net positive (A+B)" if is_pos else "net negative (C+D)"
+            st.markdown(
+                f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--color-text-secondary)">'
+                f'<span>Color intensity:</span>'
+                f'<span style="display:inline-flex;align-items:center;gap:4px">'
+                f'<span style="width:16px;height:16px;border-radius:3px;background:{color_lo[0]};border:1px solid #ccc;display:inline-block"></span> 0%'
+                f'</span>'
+                f'<span>→</span>'
+                f'<span style="display:inline-flex;align-items:center;gap:4px">'
+                f'<span style="width:16px;height:16px;border-radius:3px;background:{legend_color};display:inline-block"></span> 100% {legend_label}'
+                f'</span>'
+                f'<span style="margin-left:12px">Weight %: <span style="background:#c8e6c9;padding:1px 6px;border-radius:3px">green bar</span></span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+            def apply_style(df):
+                try:
+                    return (df.style
+                        .map(color_fn, subset=sdg_cols)
+                        .bar(subset=["Weight %"], color="#c8e6c9", vmin=0, vmax=max_w)
+                        .format(fmt_dict))
+                except AttributeError:
+                    return (df.style
+                        .applymap(color_fn, subset=sdg_cols)
+                        .bar(subset=["Weight %"], color="#c8e6c9", vmin=0, vmax=max_w)
+                        .format(fmt_dict))
+
+            row_h = max(400, len(all_sectors) * 38 + 50)
+            st.markdown("**Portfolio (PF)**")
+            st.dataframe(apply_style(pf_hm), use_container_width=True, height=row_h)
+            st.markdown("**Benchmark (BM)**")
+            st.dataframe(apply_style(bm_hm), use_container_width=True, height=row_h)
 
         # ── Sub-tab 4: Sector drivers per SDG ────────────────────────────────
         with sub4:
