@@ -611,23 +611,26 @@ def main():
         with c1:
             st.markdown("### What you'll see")
             for icon, title, desc in [
-                ("📊", "SDG Profile",    "Weighted revenue share per SDG — A/B/C/D stacked"),
-                ("⚖️", "vs Benchmark",   "Side-by-side comparison (portfolio vs SPI)"),
-                ("🔍", "Gap Analysis",   "Table of out- and underperformance per SDG"),
-                ("🏢", "Holdings",       "All constituents ranked by weight"),
+                ("📊", "SDG Profile",       "Weighted revenue share per SDG — A/B/C/D stacked bars across all 17 goals"),
+                ("⚖️", "vs Benchmark",      "Side-by-side comparison of portfolio and benchmark per SDG"),
+                ("🔍", "Gap Analysis",      "Table of out- and underperformance vs benchmark per SDG"),
+                ("🏢", "Holdings",          "All portfolio and benchmark constituents ranked by weight"),
+                ("🏭", "Sector Analysis",   "SDG profiles, heatmap, and sector drivers — portfolio vs benchmark"),
+                ("⬇️", "Export",            "Download a branded PDF report, Excel workbook, or chart images"),
             ]:
                 st.markdown(f"**{icon} {title}** — {desc}")
         with c2:
             st.markdown("""
             <div class="format-hint">
             <strong>Required file format</strong><br/>
-            Sheets: <code>Portfolio</code> and <code>SPI</code><br/>
+            Sheets: <code>Portfolio</code> and <code>Benchmark</code> (e.g. SPI, MSCI, custom)<br/>
             Columns: <code>Weight</code>, <code>Security Name</code>,
             <code>Inrate Sector</code>,<br/>
             then <code>1_A</code> <code>1_B</code> <code>1_C</code> <code>1_D</code>
             … <code>17_D</code><br/>
             A = very positive &nbsp;·&nbsp; B = positive<br/>
-            C = negative &nbsp;·&nbsp; D = very negative
+            C = negative &nbsp;·&nbsp; D = very negative<br/>
+            Values = revenue share (0–100%) per holding
             </div>
             """, unsafe_allow_html=True)
         return
