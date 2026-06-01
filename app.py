@@ -479,19 +479,32 @@ def main():
             pf_sector_names = [s for s in all_sectors if s in pf_sectors]
             sel_sector = st.selectbox("Select sector", pf_sector_names, key="sel_sector_profile")
             col1, col2 = st.columns(2)
+            # Compute shared y-axis range across both portfolio and benchmark
+            def get_yrange(w):
+                pos_max = max((w[s]["A"] + w[s]["B"]) for s in range(1, 18))
+                neg_max = max((w[s]["C"] + w[s]["D"]) for s in range(1, 18))
+                return pos_max, neg_max
+
+            pf_pos_max, pf_neg_max = get_yrange(pf_sectors[sel_sector]) if sel_sector in pf_sectors else (0, 0)
+            bm_pos_max, bm_neg_max = get_yrange(bm_sectors[sel_sector]) if sel_sector in bm_sectors else (0, 0)
+            shared_max =  max(pf_pos_max, bm_pos_max) * 1.15 or 10
+            shared_min = -max(pf_neg_max, bm_neg_max) * 1.15
+
             with col1:
                 st.markdown(f"**Portfolio — {sel_sector}**")
                 if sel_sector in pf_sectors:
                     w = pf_sectors[sel_sector]
                     fig = profile_chart(w)
-                    fig.update_layout(height=350, margin=dict(t=20, b=20, l=10, r=10))
+                    fig.update_layout(height=350, margin=dict(t=20, b=20, l=10, r=10),
+                                      yaxis=dict(range=[shared_min, shared_max]))
                     st.plotly_chart(fig, use_container_width=True)
             with col2:
                 st.markdown(f"**Benchmark — {sel_sector}**")
                 if sel_sector in bm_sectors:
                     w = bm_sectors[sel_sector]
                     fig = profile_chart(w)
-                    fig.update_layout(height=350, margin=dict(t=20, b=20, l=10, r=10))
+                    fig.update_layout(height=350, margin=dict(t=20, b=20, l=10, r=10),
+                                      yaxis=dict(range=[shared_min, shared_max]))
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("This sector is not present in the benchmark.")
@@ -503,32 +516,53 @@ def main():
             merged = pf_sum_df.merge(bm_sum_df, on="Sector", suffixes=(" PF", " BM"), how="outer").fillna(0)
             merged = merged.sort_values("Net pos % PF", ascending=True)
 
+            n_sectors = len(merged)
+            # y positions: PF on top (+0.22), BM below (-0.22) per sector — same logic as vs Benchmark tab
+            y_pf2 = [(n_sectors - i) * 3 + 0.55 for i in range(n_sectors)]
+            y_bm2 = [(n_sectors - i) * 3 - 0.55 for i in range(n_sectors)]
+            y_ticks2 = [(n_sectors - i) * 3 for i in range(n_sectors)]
+
             fig2 = go.Figure()
-            for label, col, color, sign in [
-                ("PF net positive",  "Net pos % PF", "#66BB6A",  1),
-                ("PF net negative",  "Net neg % PF", "#f4a0a0", -1),
-                ("BM net positive",  "Net pos % BM", "#1B5E20",  1),
-                ("BM net negative",  "Net neg % BM", "#B71C1C", -1),
+            for label, col_pos, col_neg, color_pos, color_neg, ys in [
+                ("PF", "Net pos % PF", "Net neg % PF", "#66BB6A", "#f4a0a0", y_pf2),
+                ("BM", "Net pos % BM", "Net neg % BM", "#1B5E20", "#B71C1C", y_bm2),
             ]:
-                vals = merged[col] * sign
-                fig2.add_trace(go.Bar(
-                    name=label, x=vals, y=merged["Sector"],
-                    orientation="h", marker_color=color,
-                    marker_line_width=0,
-                    width=0.35 if "PF" in label else 0.35,
-                    offsetgroup="PF" if "PF" in label else "BM",
-                    customdata=merged[col],
-                    hovertemplate="%{y} — " + label + "<br>%{customdata:.2f}%<extra></extra>",
-                ))
+                for col, color, sign, lname in [
+                    (col_pos, color_pos,  1, f"{label} positive"),
+                    (col_neg, color_neg, -1, f"{label} negative"),
+                ]:
+                    vals = merged[col] * sign
+                    text_vals = [f"{abs(v):.1f}%" if abs(v) >= 1 else "" for v in vals]
+                    fig2.add_trace(go.Bar(
+                        name=lname, x=vals, y=ys,
+                        orientation="h", marker_color=color,
+                        marker_line_width=0, width=0.9,
+                        offsetgroup=label,
+                        text=text_vals, textposition="inside",
+                        textfont=dict(size=10, color="white"),
+                        customdata=[[row, merged[col].iloc[i]] for i, row in enumerate(merged["Sector"])],
+                        hovertemplate="%{customdata[0]} — " + lname + "<br>%{customdata[1]:.2f}%<extra></extra>",
+                        legendgroup=lname.split()[1],
+                        showlegend=ys is y_pf2,
+                    ))
+
+            # PF/BM labels for each sector
+            for i in range(n_sectors):
+                fig2.add_annotation(x=-0.5, y=y_pf2[i], text="<b>PF</b>", showarrow=False,
+                    font=dict(size=9, color="#888"), xanchor="right", xref="x", yref="y")
+                fig2.add_annotation(x=-0.5, y=y_bm2[i], text="<b>BM</b>", showarrow=False,
+                    font=dict(size=9, color="#666"), xanchor="right", xref="x", yref="y")
+
             fig2.update_layout(
                 barmode="relative",
                 plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-                height=max(400, len(merged) * 55),
-                margin=dict(l=10, r=20, t=20, b=60),
+                height=max(500, n_sectors * 72),
+                margin=dict(l=20, r=20, t=20, b=80),
                 xaxis=dict(title="Average net SDG score (%)", ticksuffix="%",
                            gridcolor="rgba(128,128,128,0.15)", zeroline=True, zerolinecolor="#888"),
-                yaxis=dict(gridcolor="rgba(0,0,0,0)", tickfont=dict(size=11)),
-                legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center", font_size=11),
+                yaxis=dict(tickmode="array", tickvals=y_ticks2, ticktext=list(merged["Sector"]),
+                           gridcolor="rgba(128,128,128,0.08)", tickfont=dict(size=11)),
+                legend=dict(orientation="h", y=-0.08, x=0.5, xanchor="center", font_size=11),
             )
             st.plotly_chart(fig2, use_container_width=True)
 
