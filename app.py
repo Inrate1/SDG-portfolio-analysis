@@ -1,6 +1,17 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
+import io
+import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                 TableStyle, Image as RLImage, HRFlowable,
+                                 PageBreak, KeepTogether)
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -276,6 +287,304 @@ def _common_layout(fig: go.Figure):
     )
 
 
+
+# ── Export helpers ────────────────────────────────────────────────────────────
+
+def fig_to_img_bytes(fig, width=700, height=350):
+    """Render a Plotly figure to PNG bytes."""
+    fig2 = go.Figure(fig)
+    fig2.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                       font_color="#111", width=width, height=height)
+    return pio.to_image(fig2, format="png", scale=2)
+
+
+def build_excel(pf_w, bm_w, pf_raw, spi_raw, pf_sectors, bm_sectors,
+                pf_weights, bm_weights) -> bytes:
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        wb = writer.book
+        hdr = wb.add_format({"bold": True, "bg_color": "#1B5E20",
+                              "font_color": "white", "border": 1})
+        pos_fmt = wb.add_format({"font_color": "#1b5e20", "bold": True})
+        neg_fmt = wb.add_format({"font_color": "#b71c1c", "bold": True})
+        pct_fmt = wb.add_format({"num_format": "0.00%"})
+
+        # Sheet 1: Summary metrics
+        ws = wb.add_worksheet("Summary")
+        writer.sheets["Summary"] = ws
+        pf_sum = get_summary(pf_w); bm_sum = get_summary(bm_w)
+        pf_pos = pf_sum["vp"] + pf_sum["pos"]; pf_neg = pf_sum["neg"] + pf_sum["vn"]
+        bm_pos = bm_sum["vp"] + bm_sum["pos"]; bm_neg = bm_sum["neg"] + bm_sum["vn"]
+        for c, h in enumerate(["Metric", "Portfolio", "Benchmark", "Gap"]):
+            ws.write(0, c, h, hdr)
+        rows = [
+            ["Total positive (avg A+B)", f"{pf_pos:.2f}%", f"{bm_pos:.2f}%", f"{pf_pos-bm_pos:+.2f}%"],
+            ["Total negative (avg C+D)", f"{pf_neg:.2f}%", f"{bm_neg:.2f}%", f"{pf_neg-bm_neg:+.2f}%"],
+            ["Very positive avg (A)",    f"{pf_sum['vp']:.2f}%", f"{bm_sum['vp']:.2f}%", f"{pf_sum['vp']-bm_sum['vp']:+.2f}%"],
+            ["Positive avg (B)",         f"{pf_sum['pos']:.2f}%", f"{bm_sum['pos']:.2f}%", f"{pf_sum['pos']-bm_sum['pos']:+.2f}%"],
+            ["Negative avg (C)",         f"{pf_sum['neg']:.2f}%", f"{bm_sum['neg']:.2f}%", f"{pf_sum['neg']-bm_sum['neg']:+.2f}%"],
+            ["Very negative avg (D)",    f"{pf_sum['vn']:.2f}%", f"{bm_sum['vn']:.2f}%", f"{pf_sum['vn']-bm_sum['vn']:+.2f}%"],
+        ]
+        for r, row in enumerate(rows, 1):
+            for c, v in enumerate(row): ws.write(r, c, v)
+        ws.set_column(0, 0, 28); ws.set_column(1, 3, 16)
+
+        # Sheet 2: Gap analysis
+        gap_rows = []
+        for i, name in enumerate(SDG_NAMES):
+            s = i + 1
+            pp = pf_w[s]["A"] + pf_w[s]["B"]; bp = bm_w[s]["A"] + bm_w[s]["B"]
+            pn = pf_w[s]["C"] + pf_w[s]["D"]; bn = bm_w[s]["C"] + bm_w[s]["D"]
+            gap_rows.append({"SDG": f"SDG {s}", "Goal": name,
+                             "PF pos %": round(pp,2), "BM pos %": round(bp,2), "Δ pos": round(pp-bp,2),
+                             "PF neg %": round(pn,2), "BM neg %": round(bn,2), "Δ neg": round(pn-bn,2)})
+        pd.DataFrame(gap_rows).to_excel(writer, sheet_name="Gap Analysis", index=False)
+
+        # Sheet 3 & 4: Holdings
+        build_holdings(pf_raw).to_excel(writer, sheet_name="Portfolio Holdings", index=False)
+        build_holdings(spi_raw).to_excel(writer, sheet_name="Benchmark Holdings", index=False)
+
+        # Sheet 5: Sector summary
+        pf_sec_df = build_sector_summary(pf_sectors)
+        bm_sec_df = build_sector_summary(bm_sectors)
+        merged = pf_sec_df.merge(bm_sec_df, on="Sector", suffixes=(" PF", " BM"), how="outer").fillna(0)
+        merged["PF weight %"] = merged["Sector"].map(lambda s: pf_weights.get(s, 0))
+        merged["BM weight %"] = merged["Sector"].map(lambda s: bm_weights.get(s, 0))
+        merged.to_excel(writer, sheet_name="Sector Summary", index=False)
+
+    return buf.getvalue()
+
+
+def build_pdf(pf_w, bm_w, pf_raw, spi_raw, pf_sectors, bm_sectors,
+              pf_weights, bm_weights, profile_fig, compare_fig) -> bytes:
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    GREEN  = colors.HexColor("#1B5E20")
+    LGREEN = colors.HexColor("#e8f5e9")
+    DGRAY  = colors.HexColor("#444444")
+    MGRAY  = colors.HexColor("#888888")
+    RED    = colors.HexColor("#B71C1C")
+
+    h1 = ParagraphStyle("h1", fontSize=22, fontName="Helvetica-Bold",
+                         textColor=GREEN, spaceAfter=6)
+    h2 = ParagraphStyle("h2", fontSize=14, fontName="Helvetica-Bold",
+                         textColor=GREEN, spaceAfter=4, spaceBefore=12)
+    h3 = ParagraphStyle("h3", fontSize=11, fontName="Helvetica-Bold",
+                         textColor=DGRAY, spaceAfter=3, spaceBefore=8)
+    body = ParagraphStyle("body", fontSize=9, fontName="Helvetica",
+                           textColor=DGRAY, spaceAfter=4, leading=13)
+    caption = ParagraphStyle("cap", fontSize=8, fontName="Helvetica",
+                              textColor=MGRAY, spaceAfter=6, leading=11)
+    right = ParagraphStyle("right", fontSize=9, fontName="Helvetica",
+                            textColor=MGRAY, alignment=TA_RIGHT)
+
+    date_str = datetime.date.today().strftime("%d %B %Y")
+    pf_sum = get_summary(pf_w); bm_sum = get_summary(bm_w)
+    pf_pos = pf_sum["vp"]+pf_sum["pos"]; pf_neg = pf_sum["neg"]+pf_sum["vn"]
+    bm_pos = bm_sum["vp"]+bm_sum["pos"]; bm_neg = bm_sum["neg"]+bm_sum["vn"]
+
+    story = []
+
+    # ── Cover page ──────────────────────────────────────────────────────────
+    story.append(Spacer(1, 3*cm))
+    story.append(HRFlowable(width="100%", thickness=3, color=GREEN))
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph("SDG Portfolio Analysis", h1))
+    story.append(Paragraph("Sustainable Development Goals · Impact Report", 
+                            ParagraphStyle("sub", fontSize=13, fontName="Helvetica",
+                                           textColor=MGRAY, spaceAfter=4)))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(HRFlowable(width="100%", thickness=1, color=LGREEN))
+    story.append(Spacer(1, 1*cm))
+
+    cover_data = [
+        ["Prepared by", "Inrate"],
+        ["Report date", date_str],
+        ["Benchmark", "SPI (Swiss Performance Index)"],
+        ["Portfolio holdings", str(len(pf_raw))],
+        ["Benchmark constituents", str(len(spi_raw))],
+    ]
+    ct = Table(cover_data, colWidths=[4.5*cm, 10*cm])
+    ct.setStyle(TableStyle([
+        ("FONTNAME", (0,0), (0,-1), "Helvetica-Bold"),
+        ("FONTNAME", (1,0), (1,-1), "Helvetica"),
+        ("FONTSIZE", (0,0), (-1,-1), 10),
+        ("TEXTCOLOR", (0,0), (0,-1), DGRAY),
+        ("TEXTCOLOR", (1,0), (1,-1), DGRAY),
+        ("ROWBACKGROUNDS", (0,0), (-1,-1), [colors.white, LGREEN]),
+        ("TOPPADDING", (0,0), (-1,-1), 6),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 6),
+        ("LEFTPADDING", (0,0), (-1,-1), 8),
+    ]))
+    story.append(ct)
+    story.append(PageBreak())
+
+    # ── Executive summary ────────────────────────────────────────────────────
+    story.append(Paragraph("Executive Summary", h1))
+    story.append(HRFlowable(width="100%", thickness=1, color=LGREEN))
+    story.append(Spacer(1, 0.3*cm))
+
+    def metric_color(v): return GREEN if v >= 0 else RED
+    summary_data = [
+        ["Metric", "Portfolio", "Benchmark", "Gap"],
+        ["Total positive impact (avg A+B)", f"{pf_pos:.2f}%", f"{bm_pos:.2f}%",
+         f"{pf_pos-bm_pos:+.2f}%"],
+        ["Total negative impact (avg C+D)", f"{pf_neg:.2f}%", f"{bm_neg:.2f}%",
+         f"{pf_neg-bm_neg:+.2f}%"],
+        ["Very positive avg (A)", f"{pf_sum['vp']:.2f}%", f"{bm_sum['vp']:.2f}%",
+         f"{pf_sum['vp']-bm_sum['vp']:+.2f}%"],
+        ["Positive avg (B)", f"{pf_sum['pos']:.2f}%", f"{bm_sum['pos']:.2f}%",
+         f"{pf_sum['pos']-bm_sum['pos']:+.2f}%"],
+        ["Negative avg (C)", f"{pf_sum['neg']:.2f}%", f"{bm_sum['neg']:.2f}%",
+         f"{pf_sum['neg']-bm_sum['neg']:+.2f}%"],
+        ["Very negative avg (D)", f"{pf_sum['vn']:.2f}%", f"{bm_sum['vn']:.2f}%",
+         f"{pf_sum['vn']-bm_sum['vn']:+.2f}%"],
+    ]
+    st_table = Table(summary_data, colWidths=[6.5*cm, 3*cm, 3*cm, 3*cm])
+    ts = TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), GREEN),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTNAME", (0,1), (0,-1), "Helvetica-Bold"),
+        ("FONTNAME", (1,1), (-1,-1), "Helvetica"),
+        ("FONTSIZE", (0,0), (-1,-1), 9),
+        ("ALIGN", (1,0), (-1,-1), "CENTER"),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, LGREEN]),
+        ("GRID", (0,0), (-1,-1), 0.5, colors.HexColor("#cccccc")),
+        ("TOPPADDING", (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 5),
+    ])
+    # Color gap column
+    for r in range(1, len(summary_data)):
+        val = float(summary_data[r][3].replace("%","").replace("+",""))
+        if r in [1, 3, 4]:  # positive metrics — green gap good
+            c = GREEN if val >= 0 else RED
+        else:  # negative metrics — negative gap good
+            c = GREEN if val <= 0 else RED
+        ts.add("TEXTCOLOR", (3,r), (3,r), c)
+        ts.add("FONTNAME", (3,r), (3,r), "Helvetica-Bold")
+    st_table.setStyle(ts)
+    story.append(st_table)
+    story.append(Spacer(1, 0.5*cm))
+
+    story.append(Paragraph(
+        f"The portfolio outperforms the benchmark on positive impact by "
+        f"<b>{pf_pos-bm_pos:+.2f}%</b> and has "
+        f"<b>{abs(pf_neg-bm_neg):.2f}%</b> "
+        f"{'less' if pf_neg < bm_neg else 'more'} negative impact. "
+        f"All values represent weighted average revenue share (%) across all 17 SDGs.", body))
+    story.append(PageBreak())
+
+    # ── SDG Profile chart ────────────────────────────────────────────────────
+    story.append(Paragraph("SDG Profile — Portfolio", h1))
+    story.append(HRFlowable(width="100%", thickness=1, color=LGREEN))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph(
+        "Weighted average revenue share per SDG. Bars above zero = positive contribution (A/B). "
+        "Bars below zero = negative contribution (C/D).", caption))
+    img_bytes = fig_to_img_bytes(profile_fig, width=750, height=380)
+    story.append(RLImage(io.BytesIO(img_bytes), width=16*cm, height=8*cm))
+    story.append(PageBreak())
+
+    # ── vs Benchmark chart ───────────────────────────────────────────────────
+    story.append(Paragraph("Portfolio vs Benchmark", h1))
+    story.append(HRFlowable(width="100%", thickness=1, color=LGREEN))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph(
+        "Top bar = portfolio (PF), bottom bar = SPI benchmark (BM). "
+        "Positive values extend right, negative left.", caption))
+    img_bytes2 = fig_to_img_bytes(compare_fig, width=750, height=600)
+    story.append(RLImage(io.BytesIO(img_bytes2), width=16*cm, height=13*cm))
+    story.append(PageBreak())
+
+    # ── Gap analysis table ───────────────────────────────────────────────────
+    story.append(Paragraph("Gap Analysis — All 17 SDGs", h1))
+    story.append(HRFlowable(width="100%", thickness=1, color=LGREEN))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph("Net pos = A+B. Net neg = C+D. Gap = portfolio minus benchmark.", caption))
+
+    gap_header = ["SDG", "Goal", "PF pos", "BM pos", "Δ pos", "PF neg", "BM neg", "Δ neg"]
+    gap_table_data = [gap_header]
+    for i, name in enumerate(SDG_NAMES):
+        s = i + 1
+        pp = pf_w[s]["A"]+pf_w[s]["B"]; bp = bm_w[s]["A"]+bm_w[s]["B"]
+        pn = pf_w[s]["C"]+pf_w[s]["D"]; bn = bm_w[s]["C"]+bm_w[s]["D"]
+        gap_table_data.append([
+            f"SDG {s}", name[:28],
+            f"{pp:.1f}%", f"{bp:.1f}%", f"{pp-bp:+.1f}%",
+            f"{pn:.1f}%", f"{bn:.1f}%", f"{pn-bn:+.1f}%",
+        ])
+    gt = Table(gap_table_data, colWidths=[1.3*cm,4.8*cm,1.7*cm,1.7*cm,1.5*cm,1.7*cm,1.7*cm,1.5*cm])
+    gts = TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), GREEN),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
+        ("FONTSIZE", (0,0), (-1,-1), 7.5),
+        ("ALIGN", (2,0), (-1,-1), "CENTER"),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, LGREEN]),
+        ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#dddddd")),
+        ("TOPPADDING", (0,0), (-1,-1), 3),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 3),
+    ])
+    for r in range(1, len(gap_table_data)):
+        dp = float(gap_table_data[r][4].replace("%","").replace("+",""))
+        dn = float(gap_table_data[r][7].replace("%","").replace("+",""))
+        gts.add("TEXTCOLOR", (4,r), (4,r), GREEN if dp >= 0 else RED)
+        gts.add("FONTNAME",  (4,r), (4,r), "Helvetica-Bold")
+        gts.add("TEXTCOLOR", (7,r), (7,r), GREEN if dn <= 0 else RED)
+        gts.add("FONTNAME",  (7,r), (7,r), "Helvetica-Bold")
+    gt.setStyle(gts)
+    story.append(gt)
+    story.append(PageBreak())
+
+    # ── Top 15 Holdings ──────────────────────────────────────────────────────
+    story.append(Paragraph("Portfolio Holdings (Top 15 by Weight)", h1))
+    story.append(HRFlowable(width="100%", thickness=1, color=LGREEN))
+    story.append(Spacer(1, 0.2*cm))
+    h_df = build_holdings(pf_raw).head(15)
+    hold_data = [["#", "Name", "Sector", "Weight", "Avg pos", "Avg neg"]]
+    for i, row in h_df.iterrows():
+        hold_data.append([str(i+1), row["Name"][:32], row["Sector"][:20],
+                          f"{row['Weight %']:.1f}%",
+                          f"{row['Avg pos %']:.2f}%" if row["Avg pos %"] > 0 else "—",
+                          f"{row['Avg neg %']:.2f}%" if row["Avg neg %"] > 0 else "—"])
+    ht = Table(hold_data, colWidths=[0.8*cm,5.5*cm,3.5*cm,1.8*cm,1.8*cm,1.8*cm])
+    hts = TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), GREEN),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTNAME", (0,1), (-1,-1), "Helvetica"),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+        ("ALIGN", (3,0), (-1,-1), "CENTER"),
+        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, LGREEN]),
+        ("GRID", (0,0), (-1,-1), 0.3, colors.HexColor("#dddddd")),
+        ("TOPPADDING", (0,0), (-1,-1), 4),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+    ])
+    ht.setStyle(hts)
+    story.append(ht)
+
+    # ── Footer on all pages ──────────────────────────────────────────────────
+    def add_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(MGRAY)
+        canvas.drawString(2*cm, 1.2*cm, f"Inrate · SDG Portfolio Analysis · {date_str}")
+        canvas.drawRightString(A4[0]-2*cm, 1.2*cm, f"Page {doc.page}")
+        canvas.setStrokeColor(LGREEN)
+        canvas.setLineWidth(0.5)
+        canvas.line(2*cm, 1.5*cm, A4[0]-2*cm, 1.5*cm)
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=add_footer, onLaterPages=add_footer)
+    return buf.getvalue()
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     st.markdown("""
@@ -375,10 +684,10 @@ def main():
     st.markdown("<br/>", unsafe_allow_html=True)
 
     # Tabs
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "📊  SDG Profile", "⚖️  vs Benchmark", "🔍  Gap Analysis",
         "🏢  Portfolio Holdings", "📋  Benchmark Holdings",
-        "🏭  Sector Analysis", "ℹ️  Methodology"
+        "🏭  Sector Analysis", "ℹ️  Methodology", "⬇️  Export"
     ])
 
     with tab1:
@@ -821,6 +1130,92 @@ where $w_i$ is the normalised weight of holding $i$ (i.e. weight divided by tota
 
 The benchmark used is the **SPI (Swiss Performance Index)**, sourced from the SPI sheet of the uploaded file and computed identically to the portfolio.
         """)
+
+
+    with tab8:
+        st.markdown("### Export")
+        st.markdown("Download the full analysis as a PDF report, an Excel workbook, or individual chart images.")
+
+        # Cache computed data for export
+        p_fig = profile_chart(pf_w)
+        c_fig = compare_chart(pf_w, bm_w)
+
+        st.markdown("---")
+
+        # ── PDF ──────────────────────────────────────────────────────────────
+        col1, col2 = st.columns([2,1])
+        with col1:
+            st.markdown("#### 📄 PDF Report")
+            st.caption("A polished Inrate-branded PDF with cover page, executive summary, SDG profile chart, benchmark comparison, gap analysis table, and top holdings. Light background, ready to send to clients.")
+        with col2:
+            st.markdown("<br/>", unsafe_allow_html=True)
+            if st.button("Generate PDF", type="primary", use_container_width=True):
+                with st.spinner("Generating PDF — rendering charts..."):
+                    try:
+                        pdf_bytes = build_pdf(pf_w, bm_w, pf_raw, spi_raw,
+                                              pf_sectors, bm_sectors,
+                                              pf_weights, bm_weights,
+                                              p_fig, c_fig)
+                        st.download_button(
+                            "⬇ Download PDF",
+                            pdf_bytes,
+                            f"Inrate_SDG_Report_{datetime.date.today()}.pdf",
+                            "application/pdf",
+                            use_container_width=True,
+                            key="dl_pdf"
+                        )
+                    except Exception as e:
+                        st.error(f"PDF generation failed: {e}")
+
+        st.markdown("---")
+
+        # ── Excel ─────────────────────────────────────────────────────────────
+        col3, col4 = st.columns([2,1])
+        with col3:
+            st.markdown("#### 📊 Excel Workbook")
+            st.caption("Multi-sheet Excel file with: Summary metrics, Gap analysis (all 17 SDGs), Portfolio holdings, Benchmark holdings, Sector summary with weights.")
+        with col4:
+            st.markdown("<br/>", unsafe_allow_html=True)
+            with st.spinner(""):
+                try:
+                    xl_bytes = build_excel(pf_w, bm_w, pf_raw, spi_raw,
+                                           pf_sectors, bm_sectors,
+                                           pf_weights, bm_weights)
+                    st.download_button(
+                        "⬇ Download Excel",
+                        xl_bytes,
+                        f"Inrate_SDG_Analysis_{datetime.date.today()}.xlsx",
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="dl_xl"
+                    )
+                except Exception as e:
+                    st.error(f"Excel generation failed: {e}")
+
+        st.markdown("---")
+
+        # ── Chart PNGs ────────────────────────────────────────────────────────
+        st.markdown("#### 🖼 Chart images (PNG)")
+        st.caption("High-resolution PNG exports of individual charts, ready for presentations or reports.")
+        cc1, cc2 = st.columns(2)
+        chart_exports = [
+            (cc1, "SDG Profile", p_fig, "sdg_profile"),
+            (cc2, "vs Benchmark", c_fig, "vs_benchmark"),
+        ]
+        for col, name, fig, slug in chart_exports:
+            with col:
+                try:
+                    img = fig_to_img_bytes(fig, width=900, height=500)
+                    col.download_button(
+                        f"⬇ {name}",
+                        img,
+                        f"Inrate_{slug}_{datetime.date.today()}.png",
+                        "image/png",
+                        use_container_width=True,
+                        key=f"dl_{slug}"
+                    )
+                except Exception as e:
+                    col.error(f"Could not render {name}: {e}")
 
 
 if __name__ == "__main__":
